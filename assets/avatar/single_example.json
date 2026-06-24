@@ -1,0 +1,10 @@
+{
+  "cases": [
+    {
+      "image": "assets/avatar/inputs/portrait.png",
+      "audio": "assets/avatar/inputs/speech.wav",
+      "prompt": "A photorealistic portrait of a person looking directly at the camera, talking and speaking naturally with expressive lip movements and subtle head motion. Soft studio lighting, neutral background, calm and friendly expression.",
+      "seed": 42
+    }
+  ]
+}

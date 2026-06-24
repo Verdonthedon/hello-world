@@ -1,0 +1,4 @@
+# Extra Python dependencies used by the helper scripts in this repo.
+# The core model dependencies are installed from the cloned
+# LongCat-Video/requirements.txt and requirements_avatar.txt.
+huggingface_hub[cli]

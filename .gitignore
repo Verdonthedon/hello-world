@@ -1,0 +1,25 @@
+# Cloned upstream model code (pulled by setup.sh)
+/LongCat-Video/
+
+# Model weights (downloaded separately — large)
+weights/
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+
+# User-provided driving media + rendered outputs
+assets/avatar/inputs/*
+!assets/avatar/inputs/README.md
+outputs/
+*.mp4
+
+# Python / conda
+__pycache__/
+*.pyc
+.venv/
+env/
+*.egg-info/
+
+# Misc
+.DS_Store
