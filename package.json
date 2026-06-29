@@ -1,0 +1,27 @@
+{
+  "name": "leadflow-pro",
+  "version": "0.1.0",
+  "description": "Autonomous AI business-discovery, website-generation, and outreach engine. Finds businesses across the US & Canada, audits their web presence, generates stunning AI-SEO-optimized websites, and drafts expert-level tailored sales outreach — with a QA gate on every step.",
+  "type": "module",
+  "bin": {
+    "leadflow": "src/index.js"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "run:demo": "node src/index.js run --query \"dentists in Austin TX\" --limit 3 --mock",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "lead-generation",
+    "ai-seo",
+    "geo",
+    "website-generation",
+    "cold-email",
+    "sales-automation"
+  ],
+  "author": "LeadFlow Pro",
+  "license": "MIT"
+}

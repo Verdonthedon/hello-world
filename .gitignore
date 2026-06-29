@@ -1,0 +1,8 @@
+node_modules/
+.env
+.env.local
+data/output/
+data/leads.json
+data/store.json
+*.log
+.DS_Store
