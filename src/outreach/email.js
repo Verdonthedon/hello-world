@@ -21,7 +21,7 @@ function mockEmail(lead, analysis, audit) {
   const subject = pick(subjects, lead.name + 'subj');
 
   const openLine = audit.hasSite
-    ? `I was looking at ${lead.name}'s website and noticed something most ${analysis.category.toLowerCase()} owners in ${city} are about to get blindsided by.`
+    ? `I was looking at the website for ${lead.name} and noticed something most ${analysis.category.toLowerCase()} owners in ${city} are about to get blindsided by.`
     : `I noticed ${lead.name} doesn't have a website yet — and with what's happening to search right now, that's actually a bigger problem than it was even a year ago.`;
 
   const body = `Hi ${lead.name} team,

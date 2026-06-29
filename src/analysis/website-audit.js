@@ -64,7 +64,7 @@ export async function auditWebsite(lead) {
       hasSite: false,
       reachable: false,
       aiSeoScore: 0,
-      gaps: ['no_website', 'invisible_to_ai_search', 'no_structured_data', 'no_owned_funnel'],
+      gaps: ['no website at all', 'invisible to AI search engines', 'no structured data', 'no owned customer funnel'],
       summary: 'No website found. The business is effectively invisible to AI search engines and owns no digital real estate.',
     };
   }
@@ -76,7 +76,7 @@ export async function auditWebsite(lead) {
       hasSite: true,
       reachable: false,
       aiSeoScore: 10,
-      gaps: ['site_unreachable_or_blocked', 'no_structured_data'],
+      gaps: ['site is slow, down, or blocking crawlers', 'no structured data for AI engines'],
       summary: `Website listed (${lead.website}) but could not be loaded (${fetched.status || fetched.error}). Likely outdated, slow, or blocking crawlers — a red flag for AI indexing.`,
     };
   }
