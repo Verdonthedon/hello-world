@@ -52,7 +52,9 @@ export const config = {
     senderName: env.SENDER_NAME || 'Evan Alexander',
     senderCompany: env.SENDER_COMPANY || 'Sortelle AI',
     senderEmail: env.SENDER_EMAIL || '',
-    calendarLink: env.CALENDAR_LINK || '',
+    // Placeholder booking link until the real scheduler is configured —
+    // every CTA stays functional-looking; swap via CALENDAR_LINK in .env.
+    calendarLink: env.CALENDAR_LINK || 'https://cal.com/sortelle-ai/website-strategy-15',
   },
   runtime: {
     maxLeads: num(env.MAX_LEADS_PER_RUN, 25),

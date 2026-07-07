@@ -78,9 +78,12 @@ function mockAnalysis(lead, audit) {
     voice: model.voice,
     painPoints: model.painPoints,
     differentiators: [
-      `${lead.rating || '4.8'}★ from ${lead.reviewCount || 'local'} reviews`,
+      // Only lead with the rating when it actually sells (≥4.5)
+      ...(lead.rating >= 4.5 && lead.reviewCount >= 10
+        ? [`${lead.rating}★ from ${lead.reviewCount} verified reviews`]
+        : [`Trusted by ${lead.city || 'local'} customers for years`]),
       'Locally owned & operated',
-      'Fast, friendly response',
+      'Straight answers, honest pricing',
     ],
     palette,
     tagline: model.valueProp,

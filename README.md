@@ -5,8 +5,31 @@
 Built for the Sortelle AI Revenue Engine. Runs **fully offline in deterministic mock mode with zero dependencies**, and upgrades automatically to live APIs (Google Places, Claude, Gemini) when keys are present.
 
 ```
-discover → analyze + audit → generate website → resolve contact → draft email → QA gate → queue
+discover → analyze + audit → luxury website (design personality) → GEO audit
+        → demo page → resolve contact → 3-touch outreach sequence → QA gate → queue
 ```
+
+**v2 highlights**
+- **Design personality system** (`src/design/personalities.js`) — six distinct visual
+  worlds (Editorial Luxe, Modern Vault, Warm Artisan, Swiss Precision, Coastal Calm,
+  Noir Craft), deterministically assigned per business. Real font pairings (Fraunces,
+  Cormorant, Space Grotesk, Marcellus, Anton…), restrained luxury palettes, asymmetric
+  layouts, noise texture. Hard anti-"AI-slop" bans enforced by QA (no purple gradients,
+  no Inter/Sora display type, no icon-box grids). Codified in
+  `.claude/skills/luxury-web-design/SKILL.md`.
+- **AI-SEO / GEO skill** (`src/seo/ai-seo.js` + `.claude/skills/ai-seo-geo/SKILL.md`) —
+  full JSON-LD stack (LocalBusiness, FAQPage, BreadcrumbList, speakable), `llms.txt` +
+  AI-crawler `robots.txt` per site, definition-first passages, question-form headings,
+  self-contained entity-named FAQ answers, and a 0–100 passage-level audit that gates
+  the pipeline and doubles as the before/after sales proof.
+- **Booking architecture** — "Schedule a Call" in the sticky nav, a dedicated `#book`
+  section, and a floating button on every generated site; the demo page's single CTA
+  books a call with us (`CALENDAR_LINK`).
+- **Demo delivery page** (`demo.html` per lead) — "prepared exclusively for X" framing,
+  before/after AI-readiness scorecard, live iframe preview, one booking CTA.
+- **3-touch outreach protocol** (`docs/OUTREACH-PROTOCOL.md`) — day 0 demo delivery
+  (PAS + 4-Ps), day 3 value bump, day 8 takeaway close; category-specific pain points;
+  one CTA per email. Full playbook incl. reply handling and the 15-minute call script.
 
 ---
 

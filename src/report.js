@@ -15,20 +15,24 @@ export function writeReport(results, summary) {
       <summary>
         <span class="biz">${esc(r.lead.name)}</span>
         <span class="meta">${esc(r.lead.category)} · ${esc([r.lead.city, r.lead.region].filter(Boolean).join(', '))}</span>
-        <span class="pill" style="background:${r.audit.hasSite ? '#f59e0b' : '#dc2626'}">${r.audit.hasSite ? 'AI-SEO ' + r.audit.aiSeoScore + '/100' : 'NO SITE'}</span>
+        <span class="pill" style="background:${r.audit.hasSite ? '#f59e0b' : '#dc2626'}">${r.audit.hasSite ? 'before ' + r.audit.aiSeoScore : 'NO SITE'}</span>
+        <span class="pill" style="background:#0ea5e9">GEO ${r.geo?.score ?? '—'}</span>
         <span class="pill" style="background:${qaColor}">QA ${r.qa.score}</span>
       </summary>
       <div class="body">
+        <p><b>Design personality:</b> ${esc(r.website.personality || '—')}</p>
         <p><b>Opportunity:</b> ${esc(r.audit.summary)}</p>
         <p><b>Gaps:</b> ${(r.audit.gaps || []).map(esc).join(', ')}</p>
-        <p><b>Generated site:</b> <a href="../${esc(path.relative(config.runtime.outputDir, r.website.path))}" target="_blank">${esc(r.website.relPath)}</a></p>
+        <p><b>Generated site:</b> <a href="../${esc(path.relative(config.runtime.outputDir, r.website.path))}" target="_blank">${esc(r.website.relPath)}</a>
+           · <a href="../${esc(path.relative(config.runtime.outputDir, path.join(path.dirname(r.website.path), 'demo.html')))}" target="_blank">demo page</a></p>
         <p><b>Contact:</b> ${esc(r.contact.email || r.contact.note)}</p>
         <p><b>QA issues:</b> ${r.qa.issues.length ? r.qa.issues.map(esc).join('; ') : 'none'}</p>
+        ${(r.email.sequence || [{ day: 0, subject: r.email.subject, body: r.email.body, framework: r.email.framework }]).map((t) => `
         <div class="email">
-          <div class="subj">${esc(r.email.subject)}</div>
-          <pre>${esc(r.email.body)}</pre>
-          <div class="fw">framework: ${esc(r.email.framework)} · ${r.email.wordCount} words</div>
-        </div>
+          <div class="subj">Day ${t.day} — ${esc(t.subject)}</div>
+          <pre>${esc(t.body)}</pre>
+          <div class="fw">framework: ${esc(t.framework || '')}</div>
+        </div>`).join('')}
       </div>
     </details>`;
   }).join('');

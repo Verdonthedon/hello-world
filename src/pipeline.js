@@ -6,9 +6,12 @@ import { config } from './config.js';
 import { clamp } from './util/helpers.js';
 import { log } from './util/log.js';
 import { db } from './store/db.js';
+import fs from 'node:fs';
 import { discover } from './discovery/index.js';
 import { analyze } from './analysis/analyze.js';
 import { buildWebsite } from './generation/website.js';
+import { buildDemoPage } from './generation/demo.js';
+import { auditAiSeo } from './seo/ai-seo.js';
 import { resolveContact } from './outreach/contact.js';
 import { draftEmail } from './outreach/email.js';
 import { enqueue } from './outreach/queue.js';
@@ -23,22 +26,29 @@ export async function processLead(lead) {
   const { audit, analysis } = await analyze(lead);
   db.upsertLead({ id: lead.id, audit, analysis });
 
-  // 2. Generate the website
+  // 2. Generate the website (luxury personality + GEO instrumentation)
   const website = await buildWebsite(lead, analysis);
-  db.upsertLead({ id: lead.id, website: { path: website.path, relPath: website.relPath, bytes: website.bytes } });
 
-  // 3. Resolve contact
+  // 3. AI-SEO / GEO audit of our own output (the after-score, and a hard gate)
+  const geo = auditAiSeo(fs.readFileSync(website.path, 'utf8'), { businessName: analysis.businessName });
+  log.detail(`GEO score: ${geo.score}/100${geo.gaps.length ? ` (gaps: ${geo.gaps.slice(0, 2).join('; ')})` : ''}`);
+
+  // 4. Demo delivery page — the artifact the prospect receives
+  const demo = buildDemoPage({ lead, analysis, audit, geo, websiteDir: website.dir });
+  db.upsertLead({ id: lead.id, website: { path: website.path, relPath: website.relPath, bytes: website.bytes, personality: website.personality }, geo: { score: geo.score, gaps: geo.gaps }, demo: { relPath: demo.relPath } });
+
+  // 5. Resolve contact
   const contact = resolveContact(lead);
   log.detail(`contact: ${contact.email || contact.note}`);
 
-  // 4. Draft email
-  const email = await draftEmail(lead, analysis, audit);
-  log.detail(`email: "${email.subject}" (${email.wordCount} words, ${email.framework})`);
+  // 6. Draft the 3-touch outreach sequence
+  const email = await draftEmail(lead, analysis, audit, website);
+  log.detail(`sequence: ${email.sequence.length} touches, T1 "${email.subject}" (${email.wordCount} words)`);
 
-  // 5. QA gate
-  const qa = await runQA({ lead, website, email });
+  // 7. QA gate (design contract + email + personalization + GEO)
+  const qa = await runQA({ lead, website, email, geo });
 
-  // 6. Enqueue (draft-only). Marked needs_contact if no address yet.
+  // 8. Enqueue (draft-only). Marked needs_contact if no address yet.
   const queued = enqueue({
     leadId: lead.id,
     business: lead.name,
@@ -47,19 +57,21 @@ export async function processLead(lead) {
     subject: email.subject,
     body: email.body,
     framework: email.framework,
+    sequence: email.sequence,
     websitePreview: website.relPath,
+    demoPreview: demo.relPath,
     qaScore: qa.score,
   });
 
   db.upsertLead({
     id: lead.id,
     contact,
-    email: { subject: email.subject, body: email.body, framework: email.framework, wordCount: email.wordCount },
+    email: { subject: email.subject, body: email.body, framework: email.framework, wordCount: email.wordCount, sequence: email.sequence },
     qa,
     status: qa.passed ? (contact.email ? 'ready_for_review' : 'needs_contact') : 'qa_failed',
   });
 
-  return { lead, audit, analysis, website, contact, email, qa, queued };
+  return { lead, audit, analysis, website, geo, demo, contact, email, qa, queued };
 }
 
 export async function runPipeline({ query, limit = 10, mock = false }) {

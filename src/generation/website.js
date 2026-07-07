@@ -1,72 +1,212 @@
-// Website renderer — produces a single self-contained, production-grade HTML
-// page: modern design (Tailwind CDN + custom CSS), scroll animations, AND deep
-// AI-SEO/GEO instrumentation (JSON-LD LocalBusiness + FAQPage, full meta/OG,
-// semantic headings, answer-style FAQ). Zero build step; opens in any browser.
+// Luxury website renderer — implements .claude/skills/luxury-web-design +
+// .claude/skills/ai-seo-geo. Produces a single self-contained HTML page with:
+//   • a per-brand design personality (fonts, palette, layout variants) so no
+//     two clients receive the same design and nothing reads "AI-built"
+//   • editorial-scale typography, asymmetric layouts, noise texture, hairlines
+//   • full GEO instrumentation (JSON-LD stack, speakable, definition-first)
+//   • booking architecture: sticky nav CTA, #book section, floating button
+// Zero build step; complete with JS disabled (reveal animations are additive).
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { slugify } from '../util/helpers.js';
 import { generateCopy } from './copy.js';
+import { pickPersonality, NOISE_DATA_URI, googleFontsHref } from '../design/personalities.js';
+import { buildSchemas, writeGeoArtifacts, canonicalUrl } from '../seo/ai-seo.js';
 import { log } from '../util/log.js';
 
 const esc = (s) =>
   String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-function jsonLd(lead, analysis, copy) {
-  const local = {
-    '@context': 'https://schema.org',
-    '@type': 'LocalBusiness',
-    name: analysis.businessName,
-    description: analysis.valueProp,
-    image: '',
-    telephone: lead.phone || undefined,
-    address: {
-      '@type': 'PostalAddress',
-      streetAddress: lead.address || undefined,
-      addressLocality: lead.city || undefined,
-      addressRegion: lead.region || undefined,
-      addressCountry: lead.country || undefined,
-    },
-    areaServed: analysis.location,
-    aggregateRating: lead.rating
-      ? { '@type': 'AggregateRating', ratingValue: String(lead.rating), reviewCount: String(lead.reviewCount || 0) }
-      : undefined,
-    makesOffer: (analysis.services || []).map((s) => ({ '@type': 'Offer', itemOffered: { '@type': 'Service', name: s } })),
-  };
-  const faq = {
-    '@context': 'https://schema.org',
-    '@type': 'FAQPage',
-    mainEntity: (copy.faq || []).map((f) => ({
-      '@type': 'Question',
-      name: f.q,
-      acceptedAnswer: { '@type': 'Answer', text: f.a },
-    })),
-  };
-  return [local, faq];
+/* ---------- section builders (variant-aware) ---------- */
+
+function heroHtml(p, lead, analysis, copy) {
+  const meta = `
+      <div class="hero-meta">
+        <p class="eyebrow">${esc(analysis.category)} — ${esc(analysis.location)}</p>
+        <p class="hero-def definition">${esc(copy.definition)}</p>
+        <div class="hero-actions">
+          <a class="btn primary" href="#book">${esc(copy.heroCta)}</a>
+          ${lead.phone ? `<a class="btn quiet" href="tel:${esc(lead.phone)}">${esc(lead.phone)}</a>` : ''}
+        </div>
+      </div>`;
+
+  if (p.hero === 'editorial-split') {
+    return `
+  <header class="hero split">
+    <div class="wrap hero-grid">
+      <div class="hero-main">
+        <h1 class="hero-h1">${esc(copy.heroHeadline)}</h1>
+        <p class="hero-sub">${esc(copy.heroSub)}</p>
+      </div>
+      ${meta}
+    </div>
+    <div class="hero-rule" aria-hidden="true"></div>
+  </header>`;
+  }
+  if (p.hero === 'fullbleed-center') {
+    return `
+  <header class="hero fullbleed">
+    <div class="wrap center">
+      <p class="eyebrow">${esc(analysis.category)} · ${esc(analysis.location)}</p>
+      <h1 class="hero-h1">${esc(copy.heroHeadline)}</h1>
+      <p class="hero-sub">${esc(copy.heroSub)}</p>
+      <div class="hero-actions center-actions">
+        <a class="btn primary" href="#book">${esc(copy.heroCta)}</a>
+        ${lead.phone ? `<a class="btn quiet" href="tel:${esc(lead.phone)}">${esc(lead.phone)}</a>` : ''}
+      </div>
+      <p class="hero-def definition">${esc(copy.definition)}</p>
+    </div>
+  </header>`;
+  }
+  // stacked-oversize
+  const words = copy.heroHeadline.split(' ');
+  const mid = Math.ceil(words.length / 2);
+  return `
+  <header class="hero stacked">
+    <div class="wrap">
+      <p class="eyebrow">${esc(analysis.category)} — ${esc(analysis.location)}</p>
+      <h1 class="hero-h1"><span>${esc(words.slice(0, mid).join(' '))}</span><span class="ln2">${esc(words.slice(mid).join(' '))}</span></h1>
+      <div class="stack-row">
+        <p class="hero-sub">${esc(copy.heroSub)}</p>
+        <div class="hero-actions">
+          <a class="btn primary" href="#book">${esc(copy.heroCta)}</a>
+          ${lead.phone ? `<a class="btn quiet" href="tel:${esc(lead.phone)}">${esc(lead.phone)}</a>` : ''}
+        </div>
+      </div>
+      <p class="hero-def definition">${esc(copy.definition)}</p>
+    </div>
+  </header>`;
 }
 
-function render(lead, analysis, copy) {
-  const p = analysis.palette || { primary: '#0F4C81', accent: '#2EC4B6', dark: '#0B1B2B', light: '#F7FAFC' };
+function marqueeHtml(analysis) {
+  const items = [...(analysis.services || []).map((s) => (typeof s === 'string' ? s : s.name)), analysis.location, 'By appointment'];
+  const seq = items.map((i) => `<span>${esc(i)}</span><span class="dot" aria-hidden="true">·</span>`).join('');
+  return `
+  <div class="marquee" aria-hidden="true"><div class="marquee-track">${seq}${seq}</div></div>`;
+}
+
+function servicesHtml(p, analysis, copy) {
+  const items = copy.services || [];
+  let inner = '';
+  if (p.services === 'numbered') {
+    inner = `<ol class="svc-index">` + items.map((s, i) => `
+      <li class="svc-row reveal" style="--d:${i * 0.06}s">
+        <span class="svc-num">${String(i + 1).padStart(2, '0')}</span>
+        <div><h3>${esc(s.name)}</h3><p>${esc(s.desc)}</p></div>
+      </li>`).join('') + `</ol>`;
+  } else if (p.services === 'alternating') {
+    inner = items.map((s, i) => `
+      <div class="svc-alt ${i % 2 ? 'flip' : ''} reveal" style="--d:${i * 0.05}s">
+        <h3>${esc(s.name)}</h3><p>${esc(s.desc)}</p>
+      </div>`).join('');
+  } else if (p.services === 'grid-lines') {
+    inner = `<div class="svc-grid">` + items.map((s, i) => `
+      <div class="svc-cell reveal" style="--d:${i * 0.05}s">
+        <span class="svc-num">${String(i + 1).padStart(2, '0')}</span>
+        <h3>${esc(s.name)}</h3><p>${esc(s.desc)}</p>
+      </div>`).join('') + `</div>`;
+  } else { // cards-offset
+    inner = `<div class="svc-cards">` + items.map((s, i) => `
+      <article class="svc-card ${i % 2 ? 'down' : ''} reveal" style="--d:${i * 0.06}s">
+        <h3>${esc(s.name)}</h3><p>${esc(s.desc)}</p>
+      </article>`).join('') + `</div>`;
+  }
+  return `
+  <section id="services" class="section">
+    <div class="wrap">
+      <p class="eyebrow">What we do</p>
+      <h2 class="title">Services, done the way ${esc(analysis.location.split(',')[0])} deserves</h2>
+      ${inner}
+    </div>
+  </section>`;
+}
+
+function statBandHtml(copy) {
+  return `
+  <section class="statband" aria-label="Highlights">
+    <div class="wrap stat-row">
+      ${(copy.stats || []).map((s) => `<div class="stat"><b>${esc(s.n)}</b><span>${esc(s.label)}</span></div>`).join('')}
+    </div>
+  </section>`;
+}
+
+function aboutHtml(analysis, copy) {
+  return `
+  <section id="about" class="section alt">
+    <div class="wrap about-grid">
+      <div>
+        <p class="eyebrow">Why us</p>
+        <h2 class="title">${esc(copy.aboutTitle)}</h2>
+      </div>
+      <div>
+        <p class="lead">${esc(copy.aboutBody)}</p>
+        <ul class="diff-list">${(analysis.differentiators || []).map((d) => `<li>${esc(d)}</li>`).join('')}</ul>
+      </div>
+    </div>
+  </section>`;
+}
+
+function testimonialHtml(copy) {
+  if (!copy.testimonial?.quote) return '';
+  return `
+  <section class="quote-block" aria-label="Testimonial">
+    <div class="wrap">
+      <blockquote>
+        <p class="quote">“${esc(copy.testimonial.quote)}”</p>
+        <cite>— ${esc(copy.testimonial.who)}</cite>
+      </blockquote>
+    </div>
+  </section>`;
+}
+
+function faqHtml(analysis, copy) {
+  return `
+  <section id="faq" class="section">
+    <div class="wrap faq-grid">
+      <div>
+        <p class="eyebrow">Answers</p>
+        <h2 class="title">Questions ${esc(analysis.location.split(',')[0])} asks</h2>
+        <p class="lead">Straight answers — written so both neighbors and AI assistants can quote them.</p>
+      </div>
+      <div class="faq-col">
+        ${(copy.faq || []).map((f, i) => `
+        <details class="faq"${i === 0 ? ' open' : ''}>
+          <summary><h3>${esc(f.q)}</h3></summary>
+          <p class="faq-a">${esc(f.a)}</p>
+        </details>`).join('')}
+      </div>
+    </div>
+  </section>`;
+}
+
+function bookHtml(lead, analysis, copy) {
+  return `
+  <section id="book" class="section book">
+    <div class="wrap book-inner">
+      <p class="eyebrow">Booking</p>
+      <h2 class="title">${esc(copy.bookTitle)}</h2>
+      <p class="lead">${esc(copy.bookBody)}</p>
+      <div class="book-actions">
+        <a class="btn primary big" href="${lead.phone ? `tel:${esc(lead.phone)}` : '#contact'}" data-book="call">Schedule a Call</a>
+        ${lead.phone ? `<span class="book-alt">or call directly: <a href="tel:${esc(lead.phone)}">${esc(lead.phone)}</a></span>` : ''}
+      </div>
+      <p class="book-note">Response within one business day — usually much faster.</p>
+    </div>
+  </section>`;
+}
+
+/* ---------- page assembly ---------- */
+
+function render(lead, analysis, copy, p) {
+  const pal = p.palette;
+  const url = canonicalUrl(lead, analysis);
   const title = `${analysis.businessName} | ${analysis.category} in ${analysis.location}`;
-  const desc = `${analysis.valueProp} ${analysis.businessName} serves ${analysis.location}. ${copy.heroSub || ''}`.slice(0, 320);
-  const schemas = jsonLd(lead, analysis, copy)
-    .map((s) => `<script type="application/ld+json">${JSON.stringify(s, (k, v) => (v === undefined ? undefined : v))}</script>`)
+  const desc = `${copy.definition} ${copy.heroSub}`.slice(0, 330);
+  const schemas = buildSchemas({ lead, analysis, copy, url })
+    .map((s) => `<script type="application/ld+json">${JSON.stringify(s)}</script>`)
     .join('\n  ');
-
-  const servicesHtml = (copy.services || []).map((s, i) => `
-        <article class="card reveal" style="--d:${i * 0.07}s">
-          <div class="card-ico">${['◆', '✦', '❖', '✺', '✷', '✸'][i % 6]}</div>
-          <h3>${esc(s.name)}</h3>
-          <p>${esc(s.desc)}</p>
-        </article>`).join('');
-
-  const faqHtml = (copy.faq || []).map((f, i) => `
-        <details class="faq reveal" style="--d:${i * 0.05}s"${i === 0 ? ' open' : ''}>
-          <summary>${esc(f.q)}</summary>
-          <p>${esc(f.a)}</p>
-        </details>`).join('');
-
-  const diffs = (analysis.differentiators || []).map((d) => `<li>${esc(d)}</li>`).join('');
+  const city = analysis.location.split(',')[0];
 
   return `<!doctype html>
 <html lang="en">
@@ -76,151 +216,203 @@ function render(lead, analysis, copy) {
   <script>document.documentElement.classList.add('js')</script>
   <title>${esc(title)}</title>
   <meta name="description" content="${esc(desc)}" />
-  <link rel="canonical" href="${esc(lead.website || `https://www.${slugify(analysis.businessName)}.com`)}" />
+  <link rel="canonical" href="${esc(url)}" />
   <meta name="robots" content="index,follow,max-image-preview:large" />
-  <!-- Open Graph / social -->
   <meta property="og:type" content="business.business" />
   <meta property="og:title" content="${esc(title)}" />
   <meta property="og:description" content="${esc(desc)}" />
-  <meta property="og:locale" content="en_US" />
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="${esc(title)}" />
-  <meta name="twitter:description" content="${esc(desc)}" />
-  <meta name="theme-color" content="${p.primary}" />
-  <!-- Structured data for AI / generative search engines (GEO) -->
+  <meta name="theme-color" content="${pal.accent}" />
   ${schemas}
-  <script src="https://cdn.tailwindcss.com"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="${googleFontsHref(p)}" rel="stylesheet" />
   <style>
-    :root{--primary:${p.primary};--accent:${p.accent};--dark:${p.dark};--light:${p.light};}
-    *{box-sizing:border-box} html{scroll-behavior:smooth}
-    body{margin:0;font-family:Inter,system-ui,sans-serif;color:#0f172a;background:var(--light);line-height:1.6}
-    h1,h2,h3{font-family:Sora,sans-serif;line-height:1.1;letter-spacing:-.02em;margin:0}
-    .wrap{max-width:1120px;margin:0 auto;padding:0 24px}
+    :root{
+      --bg:${pal.bg};--surface:${pal.surface};--ink:${pal.ink};--muted:${pal.muted};
+      --accent:${pal.accent};--accent-ink:${pal.accentInk};--dark:${pal.dark};
+      --dark-text:${pal.darkText};--hairline:${pal.hairline};--radius:${p.radius};
+      --display:${p.fonts.displayStack};--body:${p.fonts.bodyStack};
+    }
+    *{box-sizing:border-box}html{scroll-behavior:smooth}
+    body{margin:0;font-family:var(--body);color:var(--ink);background:var(--bg);line-height:1.65;font-size:17px;-webkit-font-smoothing:antialiased;position:relative}
+    body::after{content:'';position:fixed;inset:0;pointer-events:none;background-image:${NOISE_DATA_URI};z-index:999}
+    h1,h2,h3{font-family:var(--display);font-weight:${p.fonts.display === 'Anton' || p.fonts.display === 'DM Serif Display' || p.fonts.display === 'Marcellus' ? 400 : 600};line-height:1.04;letter-spacing:${p.fonts.display === 'Anton' ? '.01em' : '-.015em'};margin:0}
     a{color:inherit}
+    .wrap{max-width:1180px;margin:0 auto;padding:0 clamp(20px,4vw,48px)}
+    .eyebrow{font-family:var(--body);text-transform:uppercase;letter-spacing:.18em;font-size:.72rem;font-weight:600;color:var(--accent);margin:0 0 1.1rem}
+    .title{font-size:clamp(2rem,4.4vw,3.2rem);max-width:22ch;margin-bottom:1.2rem}
+    .lead{color:var(--muted);font-size:1.08rem;max-width:58ch}
+    .section{padding:clamp(84px,11vw,150px) 0}
+    .section.alt{background:var(--surface);border-top:1px solid var(--hairline);border-bottom:1px solid var(--hairline)}
+
     /* nav */
-    nav{position:sticky;top:0;z-index:50;backdrop-filter:blur(12px);background:rgba(255,255,255,.72);border-bottom:1px solid rgba(0,0,0,.06)}
-    .nav-in{display:flex;align-items:center;justify-content:space-between;height:68px}
-    .brand{font-family:Sora;font-weight:800;font-size:1.15rem;color:var(--primary)}
-    .nav-cta{background:var(--primary);color:#fff;padding:.6rem 1.1rem;border-radius:999px;font-weight:600;text-decoration:none;font-size:.9rem;transition:transform .2s}
-    .nav-cta:hover{transform:translateY(-2px)}
+    nav{position:sticky;top:0;z-index:60;background:color-mix(in srgb,var(--bg) 86%,transparent);backdrop-filter:blur(14px);border-bottom:1px solid var(--hairline)}
+    .nav-in{display:flex;align-items:center;justify-content:space-between;height:72px}
+    .brand{font-family:var(--display);font-size:1.2rem;letter-spacing:.01em}
+    .nav-links{display:flex;gap:2rem;align-items:center;font-size:.92rem}
+    .nav-links a{text-decoration:none;color:var(--muted)}
+    .nav-links a:hover{color:var(--ink)}
+    @media(max-width:760px){.nav-links a:not(.btn){display:none}}
+
+    /* buttons */
+    .btn{display:inline-block;font-family:var(--body);font-weight:600;font-size:.95rem;text-decoration:none;padding:.9rem 1.7rem;border-radius:${p.buttonStyle === 'pill' ? '999px' : 'var(--radius)'};transition:transform .25s ease,opacity .25s ease;letter-spacing:.02em}
+    .btn.primary{background:var(--accent);color:var(--accent-ink)}
+    .btn.primary:hover{transform:translateY(-2px)}
+    .btn.quiet{border:1px solid var(--hairline);color:var(--ink)}
+    .btn.big{padding:1.15rem 2.4rem;font-size:1.05rem}
+    ${p.buttonStyle === 'outline-fill' ? '.btn.primary{background:transparent;border:1px solid var(--accent);color:var(--accent)}.btn.primary:hover{background:var(--accent);color:var(--accent-ink)}' : ''}
+
     /* hero */
-    .hero{position:relative;overflow:hidden;background:
-      radial-gradient(1200px 600px at 80% -10%, color-mix(in srgb,var(--accent) 35%, transparent), transparent),
-      linear-gradient(160deg,var(--dark),var(--primary));color:#fff;padding:120px 0 130px}
-    .hero .badge{display:inline-flex;gap:.5rem;align-items:center;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);padding:.4rem .9rem;border-radius:999px;font-size:.82rem;font-weight:600;margin-bottom:1.4rem}
-    .hero h1{font-size:clamp(2.4rem,6vw,4rem);max-width:16ch}
-    .hero p.sub{font-size:clamp(1.05rem,2vw,1.3rem);max-width:54ch;margin:1.4rem 0 2rem;color:rgba(255,255,255,.86)}
-    .btn{display:inline-block;background:var(--accent);color:var(--dark);font-weight:700;padding:1rem 1.8rem;border-radius:14px;text-decoration:none;box-shadow:0 12px 30px rgba(0,0,0,.25);transition:transform .2s,box-shadow .2s}
-    .btn:hover{transform:translateY(-3px);box-shadow:0 18px 40px rgba(0,0,0,.32)}
-    .btn.ghost{background:transparent;color:#fff;border:1px solid rgba(255,255,255,.35);box-shadow:none;margin-left:.8rem}
-    .stats{display:flex;gap:2.5rem;margin-top:3rem;flex-wrap:wrap}
-    .stats b{font-family:Sora;font-size:1.8rem;display:block}
-    .stats span{color:rgba(255,255,255,.7);font-size:.9rem}
-    /* sections */
-    section{padding:88px 0}
-    .eyebrow{color:var(--accent);font-weight:700;text-transform:uppercase;letter-spacing:.12em;font-size:.8rem}
-    h2.title{font-size:clamp(1.8rem,4vw,2.6rem);margin:.5rem 0 1rem;max-width:20ch}
-    .lead{color:#475569;font-size:1.1rem;max-width:60ch}
-    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:22px;margin-top:2.5rem}
-    .card{background:#fff;border:1px solid rgba(0,0,0,.06);border-radius:18px;padding:28px;box-shadow:0 6px 24px rgba(15,23,42,.05);transition:transform .25s,box-shadow .25s}
-    .card:hover{transform:translateY(-6px);box-shadow:0 18px 44px rgba(15,23,42,.12)}
-    .card-ico{width:46px;height:46px;display:grid;place-items:center;border-radius:12px;background:color-mix(in srgb,var(--primary) 12%,transparent);color:var(--primary);font-size:1.3rem;margin-bottom:1rem}
-    .card h3{font-size:1.15rem;margin-bottom:.5rem}
-    .card p{color:#64748b;font-size:.96rem;margin:0}
-    .about{background:var(--dark);color:#fff}
-    .about .lead{color:rgba(255,255,255,.8)}
-    .about ul{list-style:none;padding:0;margin:1.6rem 0 0;display:flex;flex-wrap:wrap;gap:.8rem}
-    .about li{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.16);padding:.5rem 1rem;border-radius:999px;font-size:.9rem;font-weight:600}
-    .faq{background:#fff;border:1px solid rgba(0,0,0,.07);border-radius:14px;padding:0 22px;margin-bottom:14px;overflow:hidden}
-    .faq summary{cursor:pointer;font-family:Sora;font-weight:700;padding:20px 0;list-style:none;font-size:1.05rem}
+    .hero{padding:clamp(90px,12vw,170px) 0 clamp(70px,9vw,130px);position:relative}
+    .hero-h1{font-size:clamp(2.9rem,7.2vw,6rem);max-width:14ch}
+    .hero-sub{font-size:clamp(1.05rem,1.6vw,1.28rem);color:var(--muted);max-width:46ch;margin:1.6rem 0 0}
+    .hero-def{font-size:.95rem;color:var(--muted);border-left:2px solid var(--accent);padding-left:1rem;max-width:44ch;margin-top:2rem}
+    .hero-actions{display:flex;gap:.9rem;flex-wrap:wrap;margin-top:2.2rem;align-items:center}
+    .hero.split .hero-grid{display:grid;grid-template-columns:7fr 4fr;gap:clamp(2rem,6vw,6rem);align-items:end}
+    .hero.split .hero-meta{padding-bottom:.4rem}
+    .hero-rule{height:1px;background:var(--hairline);margin-top:clamp(48px,7vw,90px)}
+    @media(max-width:860px){.hero.split .hero-grid{grid-template-columns:1fr}}
+    .hero.fullbleed{background:var(--dark);color:var(--dark-text)}
+    .hero.fullbleed .center{text-align:center;display:flex;flex-direction:column;align-items:center}
+    .hero.fullbleed .hero-sub{color:color-mix(in srgb,var(--dark-text) 72%,transparent)}
+    .hero.fullbleed .hero-def{border-left:0;border-top:1px solid var(--hairline);padding:1.4rem 0 0;margin-top:3rem;color:color-mix(in srgb,var(--dark-text) 62%,transparent)}
+    .hero.stacked .hero-h1{font-size:clamp(3.2rem,10vw,7.2rem);text-transform:${p.fonts.display === 'Anton' ? 'uppercase' : 'none'};max-width:none}
+    .hero.stacked .hero-h1 span{display:block}
+    .hero.stacked .ln2{color:var(--accent)}
+    .stack-row{display:flex;justify-content:space-between;gap:2.5rem;align-items:flex-end;flex-wrap:wrap;margin-top:2.2rem}
+
+    /* marquee */
+    .marquee{overflow:hidden;border-top:1px solid var(--hairline);border-bottom:1px solid var(--hairline);padding:1rem 0;background:var(--surface)}
+    .marquee-track{display:flex;gap:2.4rem;white-space:nowrap;font-family:var(--display);font-size:1.05rem;animation:mq 34s linear infinite;width:max-content}
+    .marquee .dot{color:var(--accent)}
+    @keyframes mq{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+    @media(prefers-reduced-motion:reduce){.marquee-track{animation:none}}
+
+    /* services variants */
+    .svc-index{list-style:none;margin:3.5rem 0 0;padding:0}
+    .svc-row{display:grid;grid-template-columns:90px 1fr;gap:1.6rem;padding:2.1rem 0;border-top:1px solid var(--hairline)}
+    .svc-row:last-child{border-bottom:1px solid var(--hairline)}
+    .svc-num{font-family:var(--display);font-size:1.5rem;color:var(--accent)}
+    .svc-row h3{font-size:1.5rem;margin-bottom:.45rem}
+    .svc-row p{color:var(--muted);margin:0;max-width:62ch}
+    .svc-alt{padding:2.4rem 0;border-top:1px solid var(--hairline);display:grid;grid-template-columns:1fr 1fr;gap:2rem}
+    .svc-alt.flip h3{order:2}.svc-alt.flip p{order:1;text-align:right}
+    .svc-alt h3{font-size:1.7rem}.svc-alt p{color:var(--muted);margin:0}
+    @media(max-width:760px){.svc-alt{grid-template-columns:1fr}.svc-alt.flip p{text-align:left;order:2}}
+    .svc-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));margin-top:3.5rem;border-left:1px solid var(--hairline);border-top:1px solid var(--hairline)}
+    .svc-cell{border-right:1px solid var(--hairline);border-bottom:1px solid var(--hairline);padding:2rem 1.7rem;min-height:210px;display:flex;flex-direction:column;gap:.6rem}
+    .svc-cell h3{font-size:1.25rem}.svc-cell p{color:var(--muted);margin:0;font-size:.95rem}
+    .svc-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:26px;margin-top:3.5rem}
+    .svc-card{background:var(--surface);border:1px solid var(--hairline);border-radius:var(--radius);padding:2.1rem}
+    .svc-card.down{transform:translateY(26px)}
+    .svc-card h3{font-size:1.3rem;margin-bottom:.5rem}.svc-card p{color:var(--muted);margin:0;font-size:.96rem}
+    @media(max-width:760px){.svc-card.down{transform:none}}
+
+    /* stat band */
+    .statband{background:var(--dark);color:var(--dark-text);padding:clamp(44px,6vw,70px) 0}
+    .stat-row{display:flex;gap:clamp(2rem,7vw,7rem);flex-wrap:wrap}
+    .stat b{font-family:var(--display);font-size:clamp(1.9rem,3.4vw,2.8rem);display:block;font-weight:600}
+    .stat span{color:color-mix(in srgb,var(--dark-text) 62%,transparent);font-size:.9rem}
+
+    /* about */
+    .about-grid{display:grid;grid-template-columns:5fr 7fr;gap:clamp(2rem,6vw,6rem)}
+    @media(max-width:860px){.about-grid{grid-template-columns:1fr}}
+    .diff-list{list-style:none;padding:0;margin:2rem 0 0}
+    .diff-list li{padding:.85rem 0;border-top:1px solid var(--hairline);font-weight:500}
+
+    /* quote */
+    .quote-block{padding:clamp(80px,10vw,140px) 0;background:var(--surface);border-top:1px solid var(--hairline);border-bottom:1px solid var(--hairline)}
+    blockquote{margin:0;max-width:820px}
+    .quote{font-family:var(--display);font-size:clamp(1.6rem,3.4vw,2.6rem);line-height:1.25;margin:0 0 1.6rem}
+    cite{font-style:normal;color:var(--muted);font-size:.95rem;letter-spacing:.06em;text-transform:uppercase}
+
+    /* faq */
+    .faq-grid{display:grid;grid-template-columns:4fr 7fr;gap:clamp(2rem,6vw,6rem)}
+    @media(max-width:860px){.faq-grid{grid-template-columns:1fr}}
+    .faq{border-top:1px solid var(--hairline);padding:0}
+    .faq:last-child{border-bottom:1px solid var(--hairline)}
+    .faq summary{cursor:pointer;list-style:none;padding:1.5rem 2.2rem 1.5rem 0;position:relative}
     .faq summary::-webkit-details-marker{display:none}
-    .faq[open] summary{color:var(--primary)}
-    .faq p{margin:0 0 20px;color:#475569}
-    .cta-band{background:linear-gradient(120deg,var(--primary),var(--accent));color:#fff;text-align:center;border-radius:28px;padding:64px 24px;margin:40px auto}
-    .cta-band h2{font-size:clamp(1.8rem,4vw,2.6rem)}
-    footer{background:var(--dark);color:rgba(255,255,255,.7);padding:48px 0;font-size:.92rem}
-    footer .brand{color:#fff}
-    /* Progressive enhancement: content is fully visible by default; we only
-       hide + animate once JS confirms it can observe scroll (html.js). */
-    .js .reveal{opacity:0;transform:translateY(24px);transition:opacity .7s ease var(--d,0s),transform .7s ease var(--d,0s)}
+    .faq summary::after{content:'+';position:absolute;right:.2rem;top:50%;transform:translateY(-50%);font-family:var(--display);font-size:1.5rem;color:var(--accent);transition:transform .3s}
+    .faq[open] summary::after{transform:translateY(-50%) rotate(45deg)}
+    .faq summary h3{font-size:1.15rem;display:inline}
+    .faq-a{color:var(--muted);margin:0 0 1.6rem;max-width:60ch}
+
+    /* booking */
+    .book{background:var(--dark);color:var(--dark-text)}
+    .book .title{max-width:none}
+    .book .lead{color:color-mix(in srgb,var(--dark-text) 70%,transparent)}
+    .book-inner{max-width:720px}
+    .book-actions{display:flex;gap:1.2rem;align-items:center;flex-wrap:wrap;margin-top:2.4rem}
+    .book-alt{color:color-mix(in srgb,var(--dark-text) 70%,transparent);font-size:.95rem}
+    .book-alt a{color:var(--dark-text)}
+    .book-note{margin-top:1.4rem;font-size:.85rem;color:color-mix(in srgb,var(--dark-text) 55%,transparent)}
+
+    /* floating book button */
+    .float-book{position:fixed;right:22px;bottom:22px;z-index:70;box-shadow:0 14px 40px rgba(0,0,0,.28);opacity:0;pointer-events:none;transition:opacity .4s,transform .4s;transform:translateY(8px)}
+    .float-book.show{opacity:1;pointer-events:auto;transform:none}
+    html:not(.js) .float-book{opacity:1;pointer-events:auto;transform:none}
+
+    footer{padding:56px 0;border-top:1px solid var(--hairline);color:var(--muted);font-size:.92rem}
+    footer .brand{color:var(--ink);display:block;margin-bottom:.5rem}
+
+    .js .reveal{opacity:0;transform:translateY(22px);transition:opacity .7s ease var(--d,0s),transform .7s ease var(--d,0s)}
     .js .reveal.in{opacity:1;transform:none}
-    @media(max-width:640px){.btn.ghost{margin:.8rem 0 0;display:block;text-align:center}}
   </style>
 </head>
 <body>
   <nav><div class="wrap nav-in">
     <span class="brand">${esc(analysis.businessName)}</span>
-    <a class="nav-cta" href="#contact">${esc(copy.heroCta || 'Get Started')}</a>
+    <div class="nav-links">
+      <a href="#services">Services</a><a href="#about">About</a><a href="#faq">FAQ</a>
+      <a class="btn primary" href="#book">${esc(copy.heroCta)}</a>
+    </div>
   </div></nav>
 
-  <header class="hero"><div class="wrap">
-    <span class="badge">✦ AI-Search Optimized · ${esc(analysis.location)}</span>
-    <h1>${esc(copy.heroHeadline)}</h1>
-    <p class="sub">${esc(copy.heroSub)}</p>
-    <a class="btn" href="#contact">${esc(copy.heroCta || 'Get Started')}</a>
-    <a class="btn ghost" href="#services">See What We Do</a>
-    <div class="stats">
-      <div><b>${lead.rating ? lead.rating + '★' : 'Top-Rated'}</b><span>${lead.reviewCount ? lead.reviewCount + ' reviews' : 'Trusted locally'}</span></div>
-      <div><b>${esc(analysis.location.split(',')[0] || 'Local')}</b><span>Proudly serving the area</span></div>
-      <div><b>AI-Ready</b><span>Built to be found by AI search</span></div>
-    </div>
-  </div></header>
-
-  <section id="services"><div class="wrap">
-    <span class="eyebrow">What we do</span>
-    <h2 class="title">Services built around what you actually need</h2>
-    <p class="lead">${esc(analysis.valueProp)}</p>
-    <div class="grid">${servicesHtml}</div>
-  </div></section>
-
-  <section class="about" id="about"><div class="wrap">
-    <span class="eyebrow" style="color:var(--accent)">Why us</span>
-    <h2 class="title reveal">${esc(copy.aboutTitle)}</h2>
-    <p class="lead reveal" style="--d:.08s">${esc(copy.aboutBody)}</p>
-    <ul class="reveal" style="--d:.16s">${diffs}</ul>
-  </div></section>
-
-  <section id="faq"><div class="wrap">
-    <span class="eyebrow">Answers</span>
-    <h2 class="title">Questions customers (and AI assistants) ask</h2>
-    <p class="lead">Clear, quotable answers — written so AI search engines surface ${esc(analysis.businessName)} when locals ask.</p>
-    <div style="margin-top:2.5rem">${faqHtml}</div>
-  </div></section>
-
-  <section id="contact"><div class="wrap">
-    <div class="cta-band">
-      <h2>${esc(copy.heroCta || 'Ready to get started?')}</h2>
-      <p style="max-width:48ch;margin:1rem auto 2rem;opacity:.92">Reach out today — we respond fast and we'd love to help.</p>
-      ${lead.phone ? `<a class="btn" style="background:#fff;color:var(--primary)" href="tel:${esc(lead.phone)}">Call ${esc(lead.phone)}</a>` : `<a class="btn" style="background:#fff;color:var(--primary)" href="#">Request a Quote</a>`}
-    </div>
-  </div></section>
+  ${heroHtml(p, lead, analysis, copy)}
+  ${p.marquee ? marqueeHtml(analysis) : ''}
+  ${servicesHtml(p, analysis, copy)}
+  ${p.statBand ? statBandHtml(copy) : ''}
+  ${aboutHtml(analysis, copy)}
+  ${testimonialHtml(copy)}
+  ${faqHtml(analysis, copy)}
+  ${bookHtml(lead, analysis, copy)}
 
   <footer><div class="wrap">
     <span class="brand">${esc(analysis.businessName)}</span>
-    <p style="margin:.6rem 0 0">${esc(analysis.location)}${lead.phone ? ' · ' + esc(lead.phone) : ''}</p>
-    <p style="margin:.4rem 0 0;opacity:.6">© ${new Date().getFullYear()} ${esc(analysis.businessName)}. Built with AI-search optimization by LeadFlow Pro.</p>
+    <p style="margin:.2rem 0 0">${esc(lead.address || analysis.location)}${lead.phone ? ' · ' + esc(lead.phone) : ''}</p>
+    <p style="margin:.4rem 0 0;opacity:.65">© ${new Date().getFullYear()} ${esc(analysis.businessName)} · Serving ${esc(city)} and surrounding communities · AI-search optimized</p>
   </div></footer>
 
+  <a class="btn primary float-book" href="#book">Schedule a Call</a>
+
   <script>
-    const io=new IntersectionObserver((es)=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target)}}),{threshold:.12});
+    const io=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target)}}),{threshold:.1});
     document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
-    document.querySelectorAll('#services .card').forEach(el=>el.classList.add('reveal'));
+    const fb=document.querySelector('.float-book');
+    addEventListener('scroll',()=>{fb.classList.toggle('show',scrollY>420 && !isBookVisible())},{passive:true});
+    function isBookVisible(){const b=document.getElementById('book');if(!b)return false;const r=b.getBoundingClientRect();return r.top<innerHeight&&r.bottom>0}
   </script>
 </body>
 </html>`;
 }
 
 export async function buildWebsite(lead, analysis) {
+  const personality = pickPersonality(lead);
   const copy = await generateCopy(lead, analysis);
-  const html = render(lead, analysis, copy);
+  const html = render(lead, analysis, copy, personality);
   const outDir = path.join(config.root, config.runtime.outputDir, slugify(analysis.businessName));
   fs.mkdirSync(outDir, { recursive: true });
   const file = path.join(outDir, 'index.html');
   fs.writeFileSync(file, html);
-  log.ok(`Website built → ${path.relative(config.root, file)} (${(html.length / 1024).toFixed(0)} KB)`);
-  return { path: file, relPath: path.relative(config.root, file), copy, bytes: html.length };
+
+  // GEO artifacts: llms.txt + robots.txt beside the page
+  const url = canonicalUrl(lead, analysis);
+  writeGeoArtifacts({ dir: outDir, lead, analysis, copy, url });
+
+  log.ok(`Website built [${personality.name}] → ${path.relative(config.root, file)} (${(html.length / 1024).toFixed(0)} KB + llms.txt + robots.txt)`);
+  return { path: file, relPath: path.relative(config.root, file), copy, bytes: html.length, personality: personality.name, dir: outDir };
 }
 
 export default buildWebsite;
